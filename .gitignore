@@ -1,0 +1,18 @@
+# RedColor. Автор: Maksim Belonoskin, Zelenograd, Moscow, Russia.
+# Сборка и кеш
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+installer/Output/
+*.exe
+*.tmp
+*.redcolor.tmp
+
+# Личные данные пользователя: бланки, цитаты, документы — в репозиторий не попадают
+*.pdf
+цитаты.txt
+*цитат*.txt
+quotes*.txt
+fonts/
