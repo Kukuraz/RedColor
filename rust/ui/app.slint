@@ -399,6 +399,10 @@ export component AppWindow inherits Window {
     in property <string> mode: "edit";
     in property <bool> panel-visible: true;
     in property <string> tool: "select";
+    in-out property <length> float-x: 12px;
+    in-out property <length> float-y: 12px;
+    in-out property <bool> float-pinned: false;
+    callback float-position-changed(float, float, bool);
     in property <bool> show-format: true;
     in property <[string]> fonts;
     in property <TextProps> text-props;
@@ -691,10 +695,10 @@ export component AppWindow inherits Window {
                     }
                 }
                 if root.current-tab >= 0 : Rectangle {
-                    x: 12px;
-                    y: 12px;
+                    x: root.float-x;
+                    y: root.float-y;
                     width: 42px;
-                    height: 310px;
+                    height: 344px;
                     z: 10;
                     background: Theme.panel;
                     border-width: 1px;
@@ -703,15 +707,34 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         padding: 5px;
                         spacing: 2px;
-                        Rectangle { height: 4px; width: 20px; background: Theme.border2; border-radius: 2px; }
-                        IconButton { icon: @image-url("icons/cursor.svg"); tip: "Выделение"; checked: root.tool == "select"; clicked => { root.action("tool.select"); keys.focus(); } }
-                        IconButton { icon: @image-url("icons/pencil.svg"); tip: "Карандаш"; checked: root.tool == "pencil"; clicked => { root.action("tool.pencil"); keys.focus(); } }
-                        IconButton { icon: @image-url("icons/eraser.svg"); tip: "Ластик"; checked: root.tool == "eraser"; clicked => { root.action("tool.eraser"); keys.focus(); } }
-                        IconButton { icon: @image-url("icons/arrow.svg"); tip: "Стрелка"; checked: root.tool == "arrow"; clicked => { root.action("tool.arrow"); keys.focus(); } }
-                        IconButton { icon: @image-url("icons/text.svg"); tip: "Добавить текст"; checked: root.tool == "text"; clicked => { root.action("tool.text"); keys.focus(); } }
-                        IconButton { icon: @image-url("icons/check.svg"); tip: "Галочка"; checked: root.tool == "check"; clicked => { root.action("tool.check"); keys.focus(); } }
-                        IconButton { icon: @image-url("icons/highlighter.svg"); tip: "Маркер"; checked: root.tool == "highlighter"; clicked => { root.action("tool.highlighter"); keys.focus(); } }
-                        IconButton { icon: @image-url("icons/more.svg"); tip: "Все инструменты"; clicked => { root.action("mode.all"); keys.focus(); } }
+                        Rectangle {
+                            height: 12px;
+                            Rectangle { width: 20px; height: 3px; background: Theme.border2; border-radius: 2px; }
+                            grip := TouchArea {
+                                property <length> start-x;
+                                property <length> start-y;
+                                mouse-cursor: root.float-pinned ? default : move;
+                                pointer-event(event) => {
+                                    if event.kind == PointerEventKind.down { self.start-x = self.mouse-x; self.start-y = self.mouse-y; }
+                                    if event.kind == PointerEventKind.up { root.float-position-changed(root.float-x / 1px, root.float-y / 1px, root.float-pinned); }
+                                }
+                                moved => {
+                                    if self.pressed && !root.float-pinned {
+                                        root.float-x = max(0px, min(root.float-x + self.mouse-x - self.start-x, flick.width - 42px));
+                                        root.float-y = max(0px, min(root.float-y + self.mouse-y - self.start-y, flick.height - 344px));
+                                    }
+                                }
+                            }
+                        }
+                        IconButton { icon: @image-url("icons/cursor.svg"); checked: root.tool == "select"; clicked => { root.action("tool.select"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/pencil.svg"); checked: root.tool == "pencil"; clicked => { root.action("tool.pencil"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/eraser.svg"); checked: root.tool == "eraser"; clicked => { root.action("tool.eraser"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/arrow.svg"); checked: root.tool == "arrow"; clicked => { root.action("tool.arrow"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/text.svg"); checked: root.tool == "text"; clicked => { root.action("tool.text"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/check.svg"); checked: root.tool == "check"; clicked => { root.action("tool.check"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/highlighter.svg"); checked: root.tool == "highlighter"; clicked => { root.action("tool.highlighter"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/more.svg"); clicked => { root.action("mode.all"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/star.svg"); checked: root.float-pinned; clicked => { root.float-pinned = !root.float-pinned; root.float-position-changed(root.float-x / 1px, root.float-y / 1px, root.float-pinned); } }
                     }
                 }
                 if root.toast != "" : Rectangle {

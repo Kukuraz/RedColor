@@ -22,6 +22,9 @@ impl App {
         let tab = self.settings.i64("left_tab", 1).clamp(0, 3) as usize;
         w.set_mode(MODES[tab].into());
         w.set_panel_visible(self.settings.bool("left_panel", true));
+        w.set_float_x(self.settings.f64("rust_float_x", 12.0).max(0.0) as f32);
+        w.set_float_y(self.settings.f64("rust_float_y", 12.0).max(0.0) as f32);
+        w.set_float_pinned(self.settings.bool("rust_float_pinned", false));
         w.set_ink_color(color(&self.settings.str("ink_color", "#ff0000")));
         w.set_ink_width(fmt_num(self.settings.f64("ink_width", 1.5)).into());
         let sig = self.settings.str("signature_color", "");
@@ -350,6 +353,14 @@ fn fmt_num(v: f64) -> String {
 }
 
 pub(crate) fn connect(win: &AppWindow) {
+    win.on_float_position_changed(|x, y, pinned| {
+        with_app(|a| {
+            a.settings.set("rust_float_x", json!(x));
+            a.settings.set("rust_float_y", json!(y));
+            a.settings.set("rust_float_pinned", json!(pinned));
+            a.settings.save();
+        });
+    });
     win.on_set_mode(|m| {
         with_app(|a| a.set_mode(m.as_str()));
     });

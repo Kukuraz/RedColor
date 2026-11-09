@@ -22,6 +22,7 @@ export global Theme {
 export component IconButton inherits Rectangle {
     in property <image> icon;
     in property <string> tip;
+    in property <bool> tip-right: false;
     in property <length> icon-size: 18px;
     in property <bool> checked: false;
     in property <bool> enabled: true;
@@ -41,8 +42,8 @@ export component IconButton inherits Rectangle {
         clicked => { root.clicked(); }
     }
     if ta.has-hover && root.tip != "" : Rectangle {
-        y: root.height + 4px;
-        x: (root.width - self.width) / 2;
+        y: root.tip-right ? (root.height - self.height) / 2 : root.height + 4px;
+        x: root.tip-right ? root.width + 8px : (root.width - self.width) / 2;
         z: 100;
         width: tl.preferred-width + 16px;
         height: tl.preferred-height + 8px;
