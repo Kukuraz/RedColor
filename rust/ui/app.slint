@@ -690,6 +690,30 @@ export component AppWindow inherits Window {
                         zoom-out => { root.zoom-step(-1); }
                     }
                 }
+                if root.current-tab >= 0 : Rectangle {
+                    x: 12px;
+                    y: 12px;
+                    width: 42px;
+                    height: 310px;
+                    z: 10;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: Theme.border2;
+                    border-radius: 10px;
+                    VerticalLayout {
+                        padding: 5px;
+                        spacing: 2px;
+                        Rectangle { height: 4px; width: 20px; background: Theme.border2; border-radius: 2px; }
+                        IconButton { icon: @image-url("icons/cursor.svg"); tip: "Выделение"; checked: root.tool == "select"; clicked => { root.action("tool.select"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/pencil.svg"); tip: "Карандаш"; checked: root.tool == "pencil"; clicked => { root.action("tool.pencil"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/eraser.svg"); tip: "Ластик"; checked: root.tool == "eraser"; clicked => { root.action("tool.eraser"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/arrow.svg"); tip: "Стрелка"; checked: root.tool == "arrow"; clicked => { root.action("tool.arrow"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/text.svg"); tip: "Добавить текст"; checked: root.tool == "text"; clicked => { root.action("tool.text"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/check.svg"); tip: "Галочка"; checked: root.tool == "check"; clicked => { root.action("tool.check"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/highlighter.svg"); tip: "Маркер"; checked: root.tool == "highlighter"; clicked => { root.action("tool.highlighter"); keys.focus(); } }
+                        IconButton { icon: @image-url("icons/more.svg"); tip: "Все инструменты"; clicked => { root.action("mode.all"); keys.focus(); } }
+                    }
+                }
                 if root.toast != "" : Rectangle {
                     y: parent.height - self.height - 30px;
                     x: (parent.width - self.width) / 2;

@@ -68,14 +68,30 @@ impl App {
         }
     }
 
-    fn formula_image(&self, f: &text::Formula, key: &str, col: &str) -> Image {
-        let k = (key.to_string(), col.to_string());
+    fn formula_image(&self, f: &text::Formula, key: &str, col: &str, scale: f64) -> Image {
+        let quality = ((scale * self.scale as f64 * 2.0).ceil() as u32).clamp(2, 8);
+        let k = (format!("{key}:{quality}"), col.to_string());
         if let Some(img) = self.formula_imgs.borrow().get(&k) {
             return img.clone();
         }
-        let img = Image::load_from_svg_data(f.colored_svg(col).as_bytes()).unwrap_or_default();
+        let svg = f.colored_svg(col);
+        let img = (|| {
+            let doc = mupdf::Document::from_bytes(svg.as_bytes(), "image/svg+xml").ok()?;
+            let page = doc.load_page(0).ok()?;
+            let bounds = page.bounds().ok()?;
+            let longest = (bounds.x1 - bounds.x0).max(bounds.y1 - bounds.y0).max(1.0);
+            let z = (quality as f32).min(2048.0 / longest);
+            let pix = page.to_pixmap(&mupdf::Matrix::new_scale(z, z), &mupdf::Colorspace::device_rgb(), true, false).ok()?;
+            if pix.n() != 4 { return None; }
+            let (w, h, stride) = (pix.width(), pix.height(), pix.stride() as usize);
+            let mut rgba = Vec::with_capacity(w as usize * h as usize * 4);
+            for y in 0..h as usize {
+                rgba.extend_from_slice(&pix.samples()[y * stride..y * stride + w as usize * 4]);
+            }
+            Some(Image::from_rgba8_premultiplied(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rgba, w, h)))
+        })().unwrap_or_else(|| Image::load_from_svg_data(svg.as_bytes()).unwrap_or_default());
         let mut cache = self.formula_imgs.borrow_mut();
-        if cache.len() >= 256 {
+        if cache.len() >= 64 {
             cache.clear();
         }
         cache.insert(k, img.clone());
@@ -110,7 +126,7 @@ impl App {
                     y: y as f32,
                     w: (fb.w * z) as f32,
                     h: (fb.h * z) as f32,
-                    img: self.formula_image(f, &fb.key, &t.color),
+                    img: self.formula_image(f, &fb.key, &t.color, z * t.size / f.src_size.max(1.0)),
                 });
             }
         }

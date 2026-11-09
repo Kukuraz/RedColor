@@ -445,6 +445,7 @@ impl App {
             self.render.want(Vec::new());
             return;
         };
+        self.docs[c].view_y = vy;
         let cur = self.docs[c].current_page(vh);
         if self.docs[c].ov_page != cur {
             // пометки рисуются для страниц рядом с текущей
@@ -452,7 +453,6 @@ impl App {
             self.push_overlay();
         }
         let d = &mut self.docs[c];
-        d.view_y = vy;
         w.set_cur_page(cur as i32 + 1);
         let top = vy / d.zoom;
         let bottom = top + vh / d.zoom;
