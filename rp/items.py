@@ -921,6 +921,8 @@ class ShapeItem(BoxItem):
                     ("poly", [QPointF(0.05 * w, 0.5 * h), QPointF(0.95 * w, 0.5 * h)])]
         if k == "minus":
             return [("poly", [QPointF(0.05 * w, 0.5 * h), QPointF(0.95 * w, 0.5 * h)])]
+        if k == "vline":      # вертикальная черта: превращает «–» бланка в «+»
+            return [("poly", [QPointF(0.5 * w, 0), QPointF(0.5 * w, h)])]
         if k == "dot":
             return [("dot", QRectF(0.2 * w, 0.2 * h, 0.6 * w, 0.6 * h))]
         return []

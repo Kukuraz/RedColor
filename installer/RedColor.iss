@@ -8,7 +8,7 @@
   #define RootDir ".."
 #endif
 #define AppName "RedColor"
-#define AppVer "1.1"
+#define AppVer "1.2"
 #define Author "Maksim Belonoskin"
 #define AuthorFull "Maksim Belonoskin, Zelenograd, Moscow, Russia"
 
@@ -24,7 +24,7 @@ VersionInfoCompany={#Author}
 VersionInfoCopyright=© 2026 {#AuthorFull}
 VersionInfoDescription=Установка RedColor — редактора PDF для проверки работ
 VersionInfoProductName={#AppName}
-VersionInfoVersion=1.1.0.0
+VersionInfoVersion=1.2.0.0
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -51,6 +51,12 @@ russian.WelcomeLabel2=Будет установлен [name/ver] — редак�
 [Tasks]
 Name: "desktopicon"; Description: "Ярлык на рабочем столе"; GroupDescription: "Ярлыки:"
 Name: "pdfassoc"; Description: "Зарегистрировать RedColor как программу для открытия PDF"; GroupDescription: "PDF:"
+
+[InstallDelete]
+; файлы прошлых версий программы удаляются перед установкой новой (данные пользователя в %APPDATA% не трогаются)
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\RedColor.exe"
+Type: files; Name: "{app}\Информация RedColor.html"
 
 [Files]
 Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

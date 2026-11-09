@@ -276,3 +276,154 @@ def quote_placement(info):
         return zone.x0, zone.y0, max(zone.width, 80), size, max(zone.height, size * 1.3)
     w, h = info["w"], info["h"]
     return w * 0.07, h * 0.7, w * 0.55, size, h * 0.15
+
+
+# =========================================================================== полный бланк: все «+» и максимальные баллы
+MAX_SCORES = {"21": [3], "22": [2], "23": [2], "24": [3], "25": [3], "26": [3, 1]}
+# Что ставится в «полном» бланке. У 26-го «Обоснование» (последняя строка с «–») остаётся «–»,
+# балл 3 в первом окошке, второе окошко (/1) остаётся пустым (None — ничего не ставить).
+FULL_SCORES = {"21": [3], "22": [2], "23": [2], "24": [3], "25": [3], "26": [3, None]}
+FULL_SKIP_LAST_ROWS = {"26": 1}
+
+
+def task_number(path):
+    import re
+    m = re.search(r"(?<!\d)(2[1-6])(?!\d)", Path(path).stem)
+    return m.group(1) if m else None
+
+
+def max_scores(path):
+    """Максимальные баллы по номеру задания в имени файла (ЕГЭ 21 … 26); можно переопределить в настройках."""
+    custom = S.get("blank_max_scores", {}) or {}
+    name = Path(path).name
+    if name in custom:
+        return list(custom[name])
+    return list(MAX_SCORES.get(task_number(path), []))
+
+
+def full_scores(path):
+    """Баллы для «полного» бланка (можно переопределить в настройках: blank_full_scores)."""
+    custom = S.get("blank_full_scores", {}) or {}
+    name = Path(path).name
+    if name in custom:
+        return list(custom[name])
+    return list(FULL_SCORES.get(task_number(path), []))
+
+
+def _red(c):
+    return bool(c) and len(c) >= 3 and c[0] > 0.55 and c[1] < 0.4 and c[2] < 0.4
+
+
+def plus_marks(page):
+    """Где дорисовать «|», чтобы «–» стали «+»: [(x, y_центр, полудлина, толщина)]."""
+    W = page.rect.width
+    hs, vs = [], []
+    for a in page.annots():
+        if not _red(a.colors.get("stroke")):
+            continue
+        t = a.type[1]
+        bw = (a.border or {}).get("width") or -1
+        strokes = [a.vertices] if t == "Line" else (a.vertices if t == "Ink" else [])
+        for s in strokes or []:
+            xs = [q[0] for q in s]
+            ys = [q[1] for q in s]
+            if not xs:
+                continue
+            dx, dy = max(xs) - min(xs), max(ys) - min(ys)
+            if dx > 8 and dx > 2.5 * dy:
+                hs.append([min(xs), max(xs), (min(ys) + max(ys)) / 2, bw])
+            elif dy > 8 and dy > 2.5 * dx:
+                vs.append(((min(xs) + max(xs)) / 2, min(ys), max(ys)))
+    hs = [h for h in hs if (h[0] + h[1]) / 2 > W * 0.6]
+    hs.sort(key=lambda h: h[2])
+    rows = []
+    for h in hs:
+        if rows and abs(rows[-1][2] - h[2]) < 8:
+            r = rows[-1]
+            r[0], r[1] = min(r[0], h[0]), max(r[1], h[1])
+            r[3] = max(r[3], h[3])
+        else:
+            rows.append(list(h))
+    gaps = [b[2] - a[2] for a, b in zip(rows, rows[1:])]
+    step = float(np.median(gaps)) if gaps else 45.0
+    out = []
+    for r in rows:
+        xc = (r[0] + r[1]) / 2
+        if any(abs(v[0] - xc) < (r[1] - r[0]) / 2 and v[1] < r[2] < v[2] for v in vs):
+            continue      # уже «+»
+        width = r[3] if r[3] and r[3] > 0 else 2.0
+        out.append((xc, r[2], step * 0.33, max(1.5, min(width, 5.0))))
+    return out
+
+
+def score_slots(page):
+    """Окошки «/N» в поле «Балл»: [(x0, y0, x1, y1)] в pt (по рендеру нижнего левого угла страницы)."""
+    pix = page.get_pixmap(dpi=72, colorspace=pymupdf.csGRAY, annots=False)
+    a = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.stride)[:, :pix.w]
+    H, W = a.shape
+    y0, y1, x0, x1 = int(H * 0.84), int(H * 0.985), int(W * 0.02), int(W * 0.45)
+    band = a[y0:y1, x0:x1] < 110
+    rowsum = band.sum(axis=1)
+    lines, inside, start = [], False, 0
+    for y, v in enumerate(rowsum):
+        if v > 0 and not inside:
+            start, inside = y, True
+        elif v == 0 and inside:
+            lines.append((start, y))
+            inside = False
+    if inside:
+        lines.append((start, len(rowsum)))
+    lines = [l for l in lines if l[1] - l[0] >= 6]
+    if not lines:
+        return []
+    ly0, ly1 = lines[-1]
+    colsum = band[ly0:ly1].sum(axis=0)
+    clusters, inside, gap, end = [], False, 0, 0
+    for x, v in enumerate(colsum):
+        if v > 0:
+            if not inside:
+                start, inside = x, True
+            gap, end = 0, x
+        elif inside:
+            gap += 1
+            if gap > 6:
+                clusters.append((start, end + 1))
+                inside = False
+    if inside:
+        clusters.append((start, end + 1))
+    k = 72.0 / 72
+    return [((x0 + c0) * k, (y0 + ly0) * k, (x0 + c1) * k, (y0 + ly1) * k) for c0, c1 in clusters]
+
+
+_full_cache = {}
+
+
+def full_marks(path):
+    """Описание «полного» бланка: плюсы и баллы (кешируется по времени изменения файла)."""
+    p = str(path)
+    try:
+        mt = os.path.getmtime(p)
+    except OSError:
+        mt = 0
+    c = _full_cache.get(p)
+    if c and c[0] == mt:
+        return c[1]
+    doc = pymupdf.open(p)
+    page = doc[0]
+    plus = plus_marks(page)
+    slots = score_slots(page)
+    doc.close()
+    skip = FULL_SKIP_LAST_ROWS.get(task_number(p), 0)
+    if skip and len(plus) > skip:
+        plus = plus[:-skip]          # строки снизу (у 26-го — «Обоснование») остаются с «–»
+    vals = full_scores(p)
+    scores = []
+    if vals and slots:
+        targets = [slots[0], slots[-1]] if len(vals) == 2 and len(slots) >= 2 else slots[:len(vals)]
+        for (cx0, cy0, cx1, cy1), val in zip(targets, vals):
+            if val is None:            # окошко остаётся пустым
+                continue
+            scores.append({"text": str(val), "right": cx0 - 1.5, "baseline": cy1, "cap": cy1 - cy0})
+    info = {"plus": plus, "scores": scores}
+    _full_cache[p] = (mt, info)
+    return info

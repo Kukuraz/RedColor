@@ -44,6 +44,7 @@ class Page(QWidget):
     def sec(self, text, top=10):
         self.body.addSpacing(top)
         l = section(text)
+        l.setMinimumWidth(30)
         l.setContentsMargins(4, 0, 0, 6)
         self.body.addWidget(l)
 
@@ -357,13 +358,45 @@ class LeftPanel(QFrame):
         else:
             self.blank_dir_btn.setText("Выбрать папку с бланками…")
             self.blank_dir_btn.setToolTip("Бланки подтягиваются из выбранной папки (и её подпапок)")
-        for p in files:
-            b = PanelRow("blank", blank_label(p))
-            b.setMinimumHeight(26)
-            b.setStyleSheet("QToolButton#panelrow{padding:3px 8px;font-size:12px;}")
-            b.setToolTip(f"Вставить после текущей страницы\n{p}")
-            b.clicked.connect(lambda _=False, p=p: self.main.insert_blank(p))
-            self.blanks_lay.addWidget(b)
+        if files:
+            grid_w = QWidget()
+            g = QGridLayout(grid_w)
+            g.setContentsMargins(0, 0, 0, 0)
+            g.setHorizontalSpacing(2)
+            g.setVerticalSpacing(0)
+            for col, text, tip in ((0, "Пустые", "Чистый бланк"),
+                                   (1, "Полные", "Бланк со всеми «+» и максимальными баллами — их можно стереть")):
+                h = QLabel(text)
+                h.setToolTip(tip)
+                h.setStyleSheet(f"color:{T['text3']};font-size:11px;padding:2px 8px;")
+                g.addWidget(h, 0, col)
+            from PySide6.QtWidgets import QSizePolicy
+            style = "QToolButton#panelrow{padding:3px 4px;font-size:12px;}"
+
+            def _fit(btn):
+                btn.setIconSize(QSize(14, 14))
+                btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+                btn.setMinimumWidth(40)
+
+            for r, p in enumerate(files, 1):
+                label = blank_label(p)
+                b = PanelRow("blank", label)
+                b.setMinimumHeight(26)
+                b.setStyleSheet(style)
+                _fit(b)
+                b.setToolTip(f"Пустой бланк — вставить после текущей страницы\n{p}")
+                b.clicked.connect(lambda _=False, p=p: self.main.insert_blank(p))
+                g.addWidget(b, r, 0)
+                f = PanelRow("check", label)
+                f.setMinimumHeight(26)
+                f.setStyleSheet(style)
+                _fit(f)
+                f.setToolTip(f"Полный бланк: все «+» и максимальные баллы (отдельными объектами — можно стереть)\n{p}")
+                f.clicked.connect(lambda _=False, p=p: self.main.insert_blank(p, full=True))
+                g.addWidget(f, r, 1)
+            g.setColumnStretch(0, 1)
+            g.setColumnStretch(1, 1)
+            self.blanks_lay.addWidget(grid_w)
         if d and Path(d).is_dir() and not files:
             l = QLabel("В папке нет PDF")
             l.setStyleSheet(f"color:{T['text3']};padding-left:10px")

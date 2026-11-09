@@ -84,7 +84,9 @@ class PanelRow(QToolButton):
             self.setDefaultAction(action)
         self.setIcon(icons.icon(icon_name))
         self.setText(text)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # ширина берётся от панели, а не от текста — длинные подписи не раздвигают левую панель
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setMinimumWidth(30)
         self.setMinimumHeight(32)
         self.setAutoRaise(True)
         self._submenu = submenu

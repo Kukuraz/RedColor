@@ -1,0 +1,590 @@
+// RedColor — редактор PDF для проверки работ. Автор: Maksim Belonoskin, Zelenograd, Moscow, Russia.
+// Левая панель в стиле Acrobat и полоса режимов.
+import { ScrollView, ComboBox, CheckBox, LineEdit } from "std-widgets.slint";
+import { Theme, IconButton } from "common.slint";
+
+export struct BlankItem {
+    label: string,
+    path: string,
+}
+
+export struct SigItem {
+    id: string,
+    name: string,
+    img: image,
+}
+
+export struct TextProps {
+    font: string,
+    size: string,
+    color: color,
+    bold: bool,
+    italic: bool,
+    align: string,
+    auto: bool,
+}
+
+component Section inherits Text {
+    font-size: 11px;
+    font-weight: 700;
+    color: Theme.text2;
+    letter-spacing: 0.4px;
+}
+
+component PanelRow inherits Rectangle {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> arrow;
+    in property <bool> checked;
+    in property <length> row-height: 32px;
+    in property <length> font-size: 13px;
+    callback clicked();
+    height: root.row-height;
+    border-radius: 6px;
+    background: checked ? Theme.hover : (ta.pressed ? Theme.press : (ta.has-hover ? Theme.hover : transparent));
+    border-width: checked ? 1px : 0px;
+    border-color: Theme.border2;
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 8px;
+        Image { source: root.icon; width: 18px; height: 18px; y: (parent.height - 18px) / 2; colorize: Theme.icon; }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-size: root.font-size;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if root.arrow : Path {
+            width: 6px;
+            height: 6px;
+            y: parent.height / 2;
+            fill: Theme.icon;
+            commands: "M 6 0 L 6 6 L 0 6 Z";
+        }
+    }
+}
+
+component Header inherits HorizontalLayout {
+    in property <string> title;
+    in property <bool> back;
+    callback close();
+    callback go-back();
+    padding-left: 16px;
+    padding-right: 10px;
+    padding-top: 12px;
+    padding-bottom: 6px;
+    spacing: 6px;
+    height: 48px;
+    if root.back : IconButton {
+        icon: @image-url("icons/chevron_left.svg");
+        icon-size: 16px;
+        tip: "Назад";
+        clicked => { root.go-back(); }
+    }
+    Text { text: root.title; font-size: 16px; font-weight: 700; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+    IconButton { icon: @image-url("icons/close.svg"); icon-size: 14px; tip: "Закрыть панель (F4)"; clicked => { root.close(); } }
+}
+
+component Swatch inherits Rectangle {
+    in property <color> c;
+    callback picked(color);
+    width: 22px;
+    height: 22px;
+    border-radius: 3px;
+    background: c;
+    border-width: ta.has-hover ? 2px : 1px;
+    border-color: ta.has-hover ? Theme.accent : Theme.border2;
+    ta := TouchArea { clicked => { root.picked(root.c); } }
+}
+
+export component ColorButton inherits Rectangle {
+    in property <color> value;
+    in property <string> tip: "Цвет";
+    callback picked(color);
+    width: 26px;
+    height: 26px;
+    border-radius: 5px;
+    background: ta.has-hover ? Theme.hover : transparent;
+    Rectangle {
+        width: 18px;
+        height: 18px;
+        background: root.value;
+        border-width: 1px;
+        border-color: Theme.border2;
+    }
+    ta := TouchArea { clicked => { popup.show(); } }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 2px;
+        width: 8 * 26px + 12px;
+        height: 2 * 26px + 12px;
+        Rectangle {
+            background: Theme.panel;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.border2;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000080;
+        }
+        VerticalLayout {
+            padding: 6px;
+            spacing: 4px;
+            HorizontalLayout {
+                spacing: 4px;
+                for c in [#ff0000, #d4141d, #c00000, #000000, #404040, #808080, #1f4fd6, #0070c0] : Swatch { c: c; picked(v) => { root.picked(v); } }
+            }
+            HorizontalLayout {
+                spacing: 4px;
+                for c in [#00a050, #118a2e, #ff8c00, #ffd400, #7030a0, #e0007a, #00a3a3, #ffffff] : Swatch { c: c; picked(v) => { root.picked(v); } }
+            }
+        }
+    }
+}
+
+// Поле с выпадающим списком, в которое можно и ввести своё значение (как редактируемый QComboBox).
+component EditCombo inherits Rectangle {
+    in property <string> value;
+    in property <[string]> model;
+    callback edited(string);
+    width: 70px;
+    height: 30px;
+    border-radius: 4px;
+    background: transparent;
+    Rectangle { y: parent.height - 1px; height: 1px; background: ti.has-focus ? Theme.accent : Theme.border2; }
+    HorizontalLayout {
+        padding-left: 4px;
+        ti := TextInput {
+            text: root.value;
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+            single-line: true;
+            horizontal-stretch: 1;
+            accepted => { root.edited(self.text); self.clear-focus(); }
+        }
+        Rectangle {
+            width: 20px;
+            background: ata.has-hover ? Theme.hover : transparent;
+            border-radius: 4px;
+            Image { source: @image-url("icons/chevron_down.svg"); width: 14px; height: 14px; colorize: Theme.icon; }
+            ata := TouchArea { clicked => { pop.show(); } }
+        }
+    }
+    pop := PopupWindow {
+        x: 0;
+        y: root.height;
+        width: root.width;
+        height: min(root.model.length * 24px + 8px, 360px);
+        Rectangle {
+            background: Theme.panel;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Theme.border2;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000080;
+        }
+        Flickable {
+            viewport-height: root.model.length * 24px + 8px;
+            VerticalLayout {
+                padding: 4px;
+                for m in root.model : Rectangle {
+                    height: 24px;
+                    border-radius: 4px;
+                    background: mta.has-hover ? Theme.hover : transparent;
+                    Text { x: 8px; text: m; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+                    mta := TouchArea { clicked => { root.edited(m); } }
+                }
+            }
+        }
+    }
+}
+
+component Check inherits IconButton {
+    width: 30px;
+    height: 28px;
+}
+
+export component ModeBar inherits Rectangle {
+    in property <string> mode;
+    in property <bool> has-doc;
+    callback set-mode(string);
+    callback action(string);
+    height: 42px;
+    background: Theme.bar;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 10px;
+        for m in [
+            { id: "all", text: "Все инструменты" },
+            { id: "edit", text: "Редактировать" },
+            { id: "convert", text: "Преобразовать" },
+            { id: "sign", text: "Электронное подписание" },
+        ] : Rectangle {
+            width: mt.preferred-width + 28px;
+            mt := Text {
+                text: m.text;
+                font-size: 14px;
+                color: root.mode == m.id || mta.has-hover ? Theme.text : Theme.text2;
+            }
+            if root.mode == m.id : Rectangle { y: parent.height - 2px; height: 2px; background: Theme.text; }
+            mta := TouchArea { mouse-cursor: pointer; clicked => { root.set-mode(m.id); } }
+        }
+        Rectangle { width: 17px; Rectangle { width: 1px; height: 20px; background: Theme.border2; } }
+        IconButton { y: 6px; icon: @image-url("icons/undo.svg"); tip: "Отменить (Ctrl+Z)"; width: 32px; enabled: root.has-doc; clicked => { root.action("edit.undo"); } }
+        IconButton { y: 6px; icon: @image-url("icons/redo.svg"); tip: "Повторить (Ctrl+Y)"; width: 32px; enabled: root.has-doc; clicked => { root.action("edit.redo"); } }
+        Rectangle { horizontal-stretch: 1; }
+        Rectangle {
+            width: 230px;
+            HorizontalLayout {
+                search := TextInput {
+                    color: Theme.text;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    single-line: true;
+                    accepted => { root.action("search:" + self.text); self.text = ""; self.clear-focus(); }
+                }
+                Image { source: @image-url("icons/search.svg"); width: 16px; height: 16px; y: (parent.height - 16px) / 2; colorize: Theme.icon; }
+            }
+            if search.text == "" && !search.has-focus : Text {
+                x: 0;
+                text: "Найти текст или инструмент";
+                color: Theme.text3;
+                font-size: 13px;
+            }
+            Rectangle { y: parent.height - 9px; height: 1px; background: search.has-focus ? Theme.accent : transparent; }
+        }
+        Rectangle { width: 13px; Rectangle { width: 1px; height: 20px; background: Theme.border2; } }
+        IconButton { y: 6px; icon: @image-url("icons/save.svg"); tip: "Сохранить (Ctrl+S)"; enabled: root.has-doc; clicked => { root.action("file.save"); } }
+        IconButton { y: 6px; icon: @image-url("icons/upload.svg"); tip: "Сохранить как… (Ctrl+Shift+S)"; enabled: root.has-doc; clicked => { root.action("file.save_as"); } }
+        IconButton { y: 6px; icon: @image-url("icons/print.svg"); tip: "Печать… (Ctrl+P)"; enabled: root.has-doc; clicked => { root.action("file.print"); } }
+        Rectangle { width: 8px; }
+        Rectangle {
+            y: 6px;
+            height: 30px;
+            width: st.preferred-width + 32px;
+            border-radius: 15px;
+            background: sta.has-hover ? Theme.text : Theme.text2;
+            st := Text { text: "Сохранить"; color: Theme.bg; font-weight: 700; font-size: 13px; }
+            sta := TouchArea { mouse-cursor: pointer; clicked => { root.action("file.save"); } }
+        }
+    }
+}
+
+export component LeftPanel inherits Rectangle {
+    in property <string> mode;
+    in property <string> tool;
+    in property <bool> show-format: true;
+    in property <[string]> fonts;
+    in property <TextProps> text-props;
+    in property <[BlankItem]> blanks;
+    in property <string> blanks-dir-label;
+    in property <bool> blanks-dir-set;
+    in property <[SigItem]> signatures;
+    in property <color> ink-color;
+    in property <string> ink-width;
+    in property <color> sig-color;
+    in property <int> thumb-size: 150;
+    callback action(string);
+    callback close();
+    callback format(string, string);
+    callback ink-color-picked(color);
+    callback text-color-picked(color);
+    callback ink-width-set(string);
+    callback sig-color-picked(color);
+    callback insert-blank(string, bool);
+    callback arm-signature(string);
+    callback signature-menu(string);
+    callback thumb-size-set(int);
+    width: 272px;
+    background: Theme.panel;
+    Rectangle { x: parent.width - 1px; width: 1px; background: Theme.border; }
+
+    // ------------------------------------------------------------ Все инструменты
+    if root.mode == "all" : VerticalLayout {
+        Header { title: "Все инструменты"; close => { root.close(); } }
+        ScrollView {
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-bottom: 12px;
+                spacing: 2px;
+                Section { text: "РЕДАКТИРОВАНИЕ"; }
+                PanelRow { icon: @image-url("icons/edit_doc.svg"); text: "Редактировать PDF"; clicked => { root.action("mode.edit"); } }
+                PanelRow { icon: @image-url("icons/organize.svg"); text: "Систематизация страниц"; clicked => { root.action("view.organize"); } }
+                PanelRow { icon: @image-url("icons/text.svg"); text: "Добавить текст"; checked: root.tool == "text"; clicked => { root.action("tool.text"); } }
+                PanelRow { icon: @image-url("icons/image.svg"); text: "Изображение"; checked: root.tool == "image"; clicked => { root.action("tool.image"); } }
+                PanelRow { icon: @image-url("icons/quote.svg"); text: "Случайная цитата"; checked: root.tool == "quote"; clicked => { root.action("tool.quote"); } }
+                PanelRow { icon: @image-url("icons/formula.svg"); text: "Формула"; checked: root.tool == "formula"; clicked => { root.action("tool.formula"); } }
+                PanelRow { icon: @image-url("icons/blank.svg"); text: "Вставить бланк"; arrow: true; clicked => { root.action("blank.menu"); } }
+                Rectangle { height: 10px; }
+                Section { text: "РИСОВАНИЕ И ОТМЕТКИ"; }
+                PanelRow { icon: @image-url("icons/pencil.svg"); text: "Карандаш"; checked: root.tool == "pencil"; clicked => { root.action("tool.pencil"); } }
+                PanelRow { icon: @image-url("icons/highlighter.svg"); text: "Маркер"; checked: root.tool == "highlighter"; clicked => { root.action("tool.highlighter"); } }
+                PanelRow { icon: @image-url("icons/ellipse_num.svg"); text: "Овал с номером"; checked: root.tool == "ellipse_num"; clicked => { root.action("tool.ellipse_num"); } }
+                PanelRow { icon: @image-url("icons/arrow.svg"); text: "Стрелка"; checked: root.tool == "arrow"; clicked => { root.action("tool.arrow"); } }
+                PanelRow { icon: @image-url("icons/check.svg"); text: "Галочка ✓"; checked: root.tool == "check"; clicked => { root.action("tool.check"); } }
+                Rectangle { height: 10px; }
+                Section { text: "ПОДПИСАНИЕ"; }
+                PanelRow { icon: @image-url("icons/sign.svg"); text: "Электронное подписание"; clicked => { root.action("mode.sign"); } }
+                PanelRow { icon: @image-url("icons/sign.svg"); text: "Добавить подпись…"; clicked => { root.action("sign.new"); } }
+                Rectangle { height: 10px; }
+                Section { text: "ФАЙЛ"; }
+                PanelRow { icon: @image-url("icons/merge.svg"); text: "Объединение файлов"; clicked => { root.action("file.merge"); } }
+                PanelRow { icon: @image-url("icons/compress.svg"); text: "Сжать PDF"; clicked => { root.action("file.compress"); } }
+                PanelRow { icon: @image-url("icons/export.svg"); text: "Экспорт страниц в изображения"; clicked => { root.action("file.export_images"); } }
+                PanelRow { icon: @image-url("icons/quote.svg"); text: "Цитаты…"; clicked => { root.action("app.quotes"); } }
+                PanelRow { icon: @image-url("icons/keyboard.svg"); text: "Горячие клавиши…"; clicked => { root.action("app.hotkeys"); } }
+                PanelRow { icon: @image-url("icons/sliders.svg"); text: "Настройки…"; clicked => { root.action("app.settings"); } }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ Редактировать
+    if root.mode == "edit" : VerticalLayout {
+        Header { title: "Редактировать"; close => { root.close(); } }
+        ScrollView {
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-bottom: 12px;
+                spacing: 2px;
+                if root.show-format : VerticalLayout {
+                    spacing: 6px;
+                    Section { text: "ФОРМАТИРОВАТЬ ТЕКСТ"; }
+                    ComboBox {
+                        model: root.fonts;
+                        current-value: root.text-props.font;
+                        selected(v) => { root.format("font", v); }
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        EditCombo {
+                            model: ["6", "7", "8", "9", "10", "11", "12", "13", "14", "16", "18", "20", "24", "28", "32", "36", "48", "60", "72"];
+                            value: root.text-props.size;
+                            edited(v) => { root.format("size", v); }
+                        }
+                        ColorButton { y: 4px; value: root.text-props.color; picked(c) => { root.text-color-picked(c); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        Check { y: 3px; icon: @image-url("icons/align_left.svg"); tip: "По левому краю"; checked: root.text-props.align == "left"; clicked => { root.format("align", "left"); } }
+                        Check { y: 3px; icon: @image-url("icons/align_center.svg"); tip: "По центру"; checked: root.text-props.align == "center"; clicked => { root.format("align", "center"); } }
+                        Check { y: 3px; icon: @image-url("icons/align_right.svg"); tip: "По правому краю"; checked: root.text-props.align == "right"; clicked => { root.format("align", "right"); } }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Check { icon: @image-url("icons/bold.svg"); tip: "Полужирный (Ctrl+B)"; checked: root.text-props.bold; clicked => { root.format("bold", root.text-props.bold ? "0" : "1"); } }
+                        Check { icon: @image-url("icons/italic.svg"); tip: "Курсив (Ctrl+I)"; checked: root.text-props.italic; clicked => { root.format("italic", root.text-props.italic ? "0" : "1"); } }
+                        Check { icon: @image-url("icons/fit_text.svg"); tip: "Подогнать размер под страницу (Ctrl+Shift+F)"; clicked => { root.format("fit", "1"); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                    CheckBox {
+                        text: "Авторазмер по странице";
+                        checked: root.text-props.auto;
+                        toggled => { root.format("auto", self.checked ? "1" : "0"); }
+                    }
+                    Rectangle { height: 8px; }
+                    Rectangle { height: 1px; background: Theme.border; }
+                }
+                Rectangle { height: 10px; }
+                Section { text: "ИЗМЕНИТЬ СТРАНИЦУ"; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    IconButton { icon: @image-url("icons/rotate_cw.svg"); icon-size: 20px; tip: "Повернуть страницу вправо"; clicked => { root.action("page.rotate_cw"); } }
+                    IconButton { icon: @image-url("icons/page_insert.svg"); icon-size: 20px; tip: "Вставить страницы из файла…"; clicked => { root.action("page.insert_file"); } }
+                    IconButton { icon: @image-url("icons/trash.svg"); icon-size: 20px; tip: "Удалить страницу"; clicked => { root.action("page.delete"); } }
+                    IconButton { icon: @image-url("icons/extract.svg"); icon-size: 20px; tip: "Извлечь страницы…"; clicked => { root.action("page.extract"); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                PanelRow { icon: @image-url("icons/organize.svg"); text: "Систематизация страниц"; clicked => { root.action("view.organize"); } }
+                Rectangle { height: 14px; }
+                Section { text: "ДОБАВИТЬ СОДЕРЖИМОЕ"; }
+                PanelRow { icon: @image-url("icons/text.svg"); text: "Добавить текст"; checked: root.tool == "text"; clicked => { root.action("tool.text"); } }
+                PanelRow { icon: @image-url("icons/image.svg"); text: "Изображение"; checked: root.tool == "image"; clicked => { root.action("tool.image"); } }
+                PanelRow { icon: @image-url("icons/blank.svg"); text: "Вставить бланк"; arrow: true; clicked => { root.action("blank.menu"); } }
+                PanelRow { icon: @image-url("icons/quote.svg"); text: "Случайная цитата"; checked: root.tool == "quote"; clicked => { root.action("tool.quote"); } }
+                PanelRow { icon: @image-url("icons/formula.svg"); text: "Формула"; checked: root.tool == "formula"; clicked => { root.action("tool.formula"); } }
+                PanelRow { icon: @image-url("icons/sign.svg"); text: "Поставить подпись"; arrow: true; checked: root.tool == "signature"; clicked => { root.action("sign.menu"); } }
+                Rectangle { height: 14px; }
+                Section { text: "БЛАНКИ"; }
+                PanelRow {
+                    icon: @image-url("icons/folder.svg");
+                    text: root.blanks-dir-label;
+                    clicked => { root.action("blank.choose_dir"); }
+                }
+                if root.blanks.length > 0 : HorizontalLayout {
+                    spacing: 2px;
+                    Text { text: "Пустые"; color: Theme.text3; font-size: 11px; horizontal-stretch: 1; }
+                    Text { text: "Полные"; color: Theme.text3; font-size: 11px; horizontal-stretch: 1; }
+                }
+                for b in root.blanks : HorizontalLayout {
+                    spacing: 2px;
+                    PanelRow {
+                        horizontal-stretch: 1;
+                        row-height: 26px;
+                        font-size: 12px;
+                        icon: @image-url("icons/blank.svg");
+                        text: b.label;
+                        clicked => { root.insert-blank(b.path, false); }
+                    }
+                    PanelRow {
+                        horizontal-stretch: 1;
+                        row-height: 26px;
+                        font-size: 12px;
+                        icon: @image-url("icons/check.svg");
+                        text: b.label;
+                        clicked => { root.insert-blank(b.path, true); }
+                    }
+                }
+                if root.blanks-dir-set && root.blanks.length == 0 : Text {
+                    text: "В папке нет PDF";
+                    color: Theme.text3;
+                    font-size: 13px;
+                    x: 10px;
+                }
+                Rectangle { height: 14px; }
+                Section { text: "ОТМЕТКИ И РИСОВАНИЕ"; }
+                for row in [
+                    [
+                        { id: "pencil", tip: "Карандаш (P)", icon: @image-url("icons/pencil.svg") },
+                        { id: "highlighter", tip: "Маркер (U)", icon: @image-url("icons/highlighter.svg") },
+                        { id: "eraser", tip: "Ластик (E)", icon: @image-url("icons/eraser.svg") },
+                        { id: "ellipse", tip: "Овал (O)", icon: @image-url("icons/ellipse.svg") },
+                        { id: "ellipse_num", tip: "Овал с номером (N)", icon: @image-url("icons/ellipse_num.svg") },
+                        { id: "rect", tip: "Прямоугольник (R)", icon: @image-url("icons/rect.svg") },
+                    ],
+                    [
+                        { id: "line", tip: "Линия (L)", icon: @image-url("icons/line.svg") },
+                        { id: "arrow", tip: "Стрелка (A)", icon: @image-url("icons/arrow.svg") },
+                        { id: "check", tip: "Галочка ✓ (K)", icon: @image-url("icons/check.svg") },
+                        { id: "cross", tip: "Крестик ✗ (X)", icon: @image-url("icons/cross.svg") },
+                        { id: "plus", tip: "Плюс + (=)", icon: @image-url("icons/plus.svg") },
+                        { id: "minus", tip: "Минус – (-)", icon: @image-url("icons/minus.svg") },
+                    ],
+                    [
+                        { id: "dot", tip: "Точка • (.)", icon: @image-url("icons/dot.svg") },
+                        { id: "hand", tip: "Рука (H)", icon: @image-url("icons/hand.svg") },
+                    ],
+                ] : HorizontalLayout {
+                    spacing: 4px;
+                    for t in row : IconButton {
+                        width: 32px;
+                        icon: t.icon;
+                        tip: t.tip;
+                        checked: root.tool == t.id;
+                        clicked => { root.action("tool." + t.id); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                Rectangle { height: 6px; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text { text: "Линии:"; color: Theme.text2; vertical-alignment: center; font-size: 13px; }
+                    ColorButton { y: 2px; value: root.ink-color; tip: "Цвет карандаша и фигур"; picked(c) => { root.ink-color-picked(c); } }
+                    EditCombo {
+                        width: 60px;
+                        model: ["0.5", "0.75", "1", "1.5", "2", "3", "4", "6"];
+                        value: root.ink-width;
+                        edited(v) => { root.ink-width-set(v); }
+                    }
+                    Text { text: "pt"; color: Theme.text; vertical-alignment: center; font-size: 13px; }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                Rectangle { height: 14px; }
+                Section { text: "ДРУГИЕ ПАРАМЕТРЫ"; }
+                PanelRow { icon: @image-url("icons/merge.svg"); text: "Объединение файлов"; clicked => { root.action("file.merge"); } }
+                PanelRow { icon: @image-url("icons/quote.svg"); text: "Цитаты…"; clicked => { root.action("app.quotes"); } }
+                PanelRow { icon: @image-url("icons/keyboard.svg"); text: "Горячие клавиши…"; clicked => { root.action("app.hotkeys"); } }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ Преобразовать
+    if root.mode == "convert" : VerticalLayout {
+        Header { title: "Преобразовать"; close => { root.close(); } }
+        VerticalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: 2px;
+            Section { text: "ЭКСПОРТ"; }
+            PanelRow { icon: @image-url("icons/export.svg"); text: "Экспорт страниц в изображения"; clicked => { root.action("file.export_images"); } }
+            PanelRow { icon: @image-url("icons/extract.svg"); text: "Извлечь страницы…"; clicked => { root.action("page.extract"); } }
+            PanelRow { icon: @image-url("icons/upload.svg"); text: "Сохранить как…"; clicked => { root.action("file.save_as"); } }
+            Rectangle { height: 10px; }
+            Section { text: "ОПТИМИЗАЦИЯ"; }
+            PanelRow { icon: @image-url("icons/compress.svg"); text: "Сжать PDF"; clicked => { root.action("file.compress"); } }
+            PanelRow { icon: @image-url("icons/merge.svg"); text: "Объединение файлов"; clicked => { root.action("file.merge"); } }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+
+    // ------------------------------------------------------------ Подписание
+    if root.mode == "sign" : VerticalLayout {
+        Header { title: "Электронное подписание"; close => { root.close(); } }
+        ScrollView {
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 2px;
+                Section { text: "ВАШИ ПОДПИСИ"; }
+                Rectangle {
+                    min-height: 220px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    VerticalLayout {
+                        alignment: start;
+                        for s in root.signatures : Rectangle {
+                            height: 54px;
+                            background: sta.has-hover ? Theme.hover : transparent;
+                            sta := TouchArea {
+                                pointer-event(e) => {
+                                    if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) {
+                                        root.signature-menu(s.id);
+                                    }
+                                }
+                                clicked => { root.arm-signature(s.id); }
+                            }
+                            HorizontalLayout {
+                                padding: 5px;
+                                spacing: 8px;
+                                Image { source: s.img; width: 150px; image-fit: contain; colorize: root.sig-color; }
+                                Text { text: s.name; color: Theme.text; vertical-alignment: center; overflow: elide; font-size: 13px; }
+                            }
+                        }
+                        if root.signatures.length == 0 : Text {
+                            text: "Подписей пока нет";
+                            color: Theme.text3;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            height: 60px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                PanelRow { icon: @image-url("icons/sign.svg"); text: "Добавить подпись…"; clicked => { root.action("sign.new"); } }
+                PanelRow { icon: @image-url("icons/sign.svg"); text: "Добавить инициалы…"; clicked => { root.action("sign.new_initials"); } }
+                Rectangle { height: 8px; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: "Цвет подписи"; color: Theme.text; vertical-alignment: center; font-size: 13px; }
+                    ColorButton { value: root.sig-color; picked(c) => { root.sig-color-picked(c); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                Rectangle { height: 8px; }
+                Text {
+                    text: "Щёлкните подпись, затем место на странице. Правый щелчок — переименовать или удалить.";
+                    wrap: word-wrap;
+                    color: Theme.text3;
+                    font-size: 12px;
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+}

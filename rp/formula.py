@@ -63,6 +63,14 @@ class Formula:
 REGISTRY = {}
 
 
+def release_pdf_cache():
+    """Release intermediate PDF documents after the overlay has been built."""
+    for f in REGISTRY.values():
+        for doc in f._pdf.values():
+            doc.close()
+        f._pdf.clear()
+
+
 def register(f):
     old = REGISTRY.get(f.key)
     if old is not None:

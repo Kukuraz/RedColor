@@ -1,0 +1,53 @@
+// RedColor — редактор PDF для проверки работ. Автор: Maksim Belonoskin, Zelenograd, Moscow, Russia.
+
+export global Theme {
+    in-out property <bool> dark: true;
+    out property <color> bg: dark ? #1b1b1b : #f3f3f3;
+    out property <color> canvas: dark ? #1e1e1e : #e4e4e4;
+    out property <color> panel: dark ? #2b2b2b : #ffffff;
+    out property <color> panel2: dark ? #323232 : #f5f5f5;
+    out property <color> bar: dark ? #232323 : #fafafa;
+    out property <color> border: dark ? #3d3d3d : #dadada;
+    out property <color> border2: dark ? #4a4a4a : #c8c8c8;
+    out property <color> text: dark ? #f0f0f0 : #1f1f1f;
+    out property <color> text2: dark ? #c6c6c6 : #404040;
+    out property <color> text3: dark ? #8f8f8f : #7a7a7a;
+    out property <color> hover: dark ? #3a3a3a : #ececec;
+    out property <color> press: dark ? #454545 : #e0e0e0;
+    out property <color> icon: dark ? #e8e8e8 : #2c2c2c;
+    out property <color> shadow: dark ? #000000 : #7a7a7a;
+    in-out property <color> accent: #2680eb;
+}
+
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tip;
+    in property <length> icon-size: 18px;
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: 34px;
+    height: 30px;
+    border-radius: 6px;
+    background: checked ? Theme.accent : (ta.pressed ? Theme.press : (ta.has-hover ? Theme.hover : transparent));
+    Image {
+        source: root.icon;
+        width: root.icon-size;
+        height: root.icon-size;
+        colorize: root.checked ? #ffffff : (root.enabled ? Theme.icon : Theme.text3);
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+    if ta.has-hover && root.tip != "" : Rectangle {
+        y: root.height + 4px;
+        x: (root.width - self.width) / 2;
+        z: 100;
+        width: tl.preferred-width + 16px;
+        height: tl.preferred-height + 8px;
+        background: #5a5a5a;
+        border-radius: 4px;
+        tl := Text { text: root.tip; color: #ffffff; font-size: 12px; }
+    }
+}

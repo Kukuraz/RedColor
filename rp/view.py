@@ -146,8 +146,22 @@ class PdfView(QGraphicsView):
         super().wheelEvent(e)
 
     # ================================================================ страницы
+    def shutdown(self):
+        """Вкладка закрывается: больше не трогаем страницы (они удаляются вместе с документом)."""
+        self._dead = True
+        for t in (self._render_timer, self._hires_timer):
+            t.stop()
+        for sb in (self.verticalScrollBar(), self.horizontalScrollBar()):
+            try:
+                sb.valueChanged.disconnect(self._scrolled)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _alive(self):
+        return not getattr(self, "_dead", False) and not getattr(self.model, "closed", False)
+
     def current_page(self):
-        if not self.model.pages:
+        if not self._alive() or not self.model.pages:
             return 0
         c = self.mapToScene(self.viewport().rect().center())
         top = self.mapToScene(0, 0).y()
@@ -176,15 +190,22 @@ class PdfView(QGraphicsView):
         self._scrolled()
 
     def _scrolled(self, *a):
+        if not self._alive():
+            return
         self._render_timer.start()
         self._hires_timer.start()
-        cur = self.current_page()
+        try:
+            cur = self.current_page()
+        except RuntimeError:        # страницы уже удалены (документ закрывается)
+            return
         if cur != self._cur_page:
             self._cur_page = cur
         self.page_changed.emit(cur, len(self.model.pages))
 
     def update_render(self, hires=False):
         from .render import service
+        if not self._alive():
+            return
         pages = self.model.pages
         if not pages:
             return
@@ -202,10 +223,13 @@ class PdfView(QGraphicsView):
         keep = set()
         for dist, i, p, inview in visible:
             z = need_z
-            maxpx = 5200 * 5200
+            maxpx = 3600 * 3600      # предел картинки страницы (~39 МБ): больше не нужно и опасно по памяти
             if p.w * p.h * z * z > maxpx:
                 z = math.sqrt(maxpx / (p.w * p.h))
             z = round(z, 4)
+            if p.pix is not None and p.pix_zoom > z * 2.5:
+                # Пока готовится уменьшенная картинка, старую оставляем на экране.
+                p.pix_zoom = 0.0
             if p.pix is None or p.pix_zoom < z * 0.97:
                 prio = (0 if inview else 10) + dist / 10000
                 service().request(self.model.key, self.model.gen, i, z, prio)
@@ -227,8 +251,9 @@ class PdfView(QGraphicsView):
             if i not in near and p.pix is not None and (i < first - 4 or i > first + 6):
                 p.pix = None
                 p.pix_zoom = 0.0
-            elif p.pix is not None and p.pix_zoom > need_z * 2.5 and i in near:
-                pass
+            if i not in near and (i < first - 6 or i >= first + 8) and p.low is not None:
+                p.low = None
+                p.low_zoom = 0.0
 
     # ================================================================ инструменты
     def page_and_pos(self, scene_pos, strict=True):

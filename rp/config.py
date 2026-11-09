@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 APP_NAME = "RedColor"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 AUTHOR_NAME = "Maksim Belonoskin"
 AUTHOR = "Maksim Belonoskin, Zelenograd, Moscow, Russia"
 COPYRIGHT = f"© 2026 {AUTHOR}"

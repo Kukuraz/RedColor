@@ -86,7 +86,7 @@ class _Builder:
         return tuple(res)
 
 
-def html_to_runs(html, size=12.0):
+def html_to_runs(html, size=12.0, *, strict=False):
     from lxml import html as LH
     base = _source_url(html)
     frag = _fragment(html)
@@ -116,8 +116,9 @@ def html_to_runs(html, size=12.0):
                     b.formula(f, disp)
                     found_any[0] = True
                     return
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if strict:
+                        raise ValueError(f"Не удалось обработать формулу LaTeX: {exc}") from exc
         if "katex-html" in cls:
             return
         if tag == "br":
@@ -125,19 +126,22 @@ def html_to_runs(html, size=12.0):
         elif tag == "img":
             src = el.get("src") or ""
             alt = el.get("alt") or ""
-            if src and (".svg" in src.lower() or "latex" in src.lower() or "math" in cls):
+            if src and (".svg" in src.lower() or src.lower().startswith("data:image/svg") or "latex" in src.lower() or "math" in cls):
                 try:
                     url = urljoin(base, src) if base else src
                     if url.startswith("data:image/svg"):
                         import base64
                         payload = url.split(",", 1)[1]
-                        svg = base64.b64decode(payload).decode("utf-8") if ";base64" in url.split(",")[0] else payload
+                        from urllib.parse import unquote
+                        svg = base64.b64decode(payload).decode("utf-8") if ";base64" in url.split(",")[0] else unquote(payload)
                     else:
                         svg = F.fetch_svg(url)
                     f = F.from_site_svg(svg, alt)
                     b.formula(f, "display" in cls)
                     found_any[0] = True
-                except Exception:
+                except Exception as exc:
+                    if strict:
+                        raise ValueError(f"Не удалось загрузить формулу: {exc}") from exc
                     b.text(" " + _alt_line(alt) + " ")
             elif alt:
                 b.text(alt)

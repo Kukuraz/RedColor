@@ -202,6 +202,12 @@ class DocumentWidget(QWidget):
         self.view.zoom_changed.connect(self.rail.set_zoom)
         self.rail.set_page(0, len(model.pages))
 
+    def cleanup(self):
+        """Перед закрытием вкладки: отписаться от общих инструментов и остановить таймеры холста."""
+        self.floatbar.dispose()
+        self.view.shutdown()
+        self.findbar.clear_marks()
+
     def resizeEvent(self, e):
         super().resizeEvent(e)
         if self.findbar.isVisible():

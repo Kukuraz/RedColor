@@ -93,7 +93,10 @@ class GroupButton(IconButton):
 
     def _set(self, aid):
         self.cur = aid
-        self._sync()
+        try:
+            self._sync()
+        except RuntimeError:
+            pass
 
     def _sync(self):
         try:
@@ -125,6 +128,13 @@ class FloatBar(QFrame):
         self.rebuild()
 
     # ---------------------------------------------------------------- построение
+    def dispose(self):
+        """Отписать кнопки-группы от общих инструментов (вызывается при закрытии документа)."""
+        for b in self._buttons:
+            if isinstance(b, GroupButton):
+                b.dispose()
+        self._buttons = []
+
     def rebuild(self):
         c = config()
         for b in self._buttons:

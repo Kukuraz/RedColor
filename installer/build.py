@@ -62,7 +62,26 @@ def main():
     print("Inno Setup…")
     subprocess.check_call([str(ISCC), f"/DDistDir={app}", f"/DRootDir={ROOT}", f"/O{OUT}",
                            str(ROOT / "installer" / "RedColor.iss")])
+    remove_old_installers()
     print("Готово:", OUT)
+
+
+def current_version():
+    import re
+    m = re.search(r'APP_VERSION = "([^"]+)"', (ROOT / "rp" / "config.py").read_text(encoding="utf-8"))
+    return m.group(1) if m else ""
+
+
+def remove_old_installers():
+    """Оставляет в installer\\Output только установщик текущей версии."""
+    keep = f"RedColor_Setup_{current_version()}.exe"
+    for f in OUT.glob("RedColor_Setup_*"):
+        if f.name != keep:
+            try:
+                f.unlink()
+                print("удалён старый:", f.name)
+            except OSError as e:
+                print("не удалось удалить", f.name, e)
 
 
 if __name__ == "__main__":

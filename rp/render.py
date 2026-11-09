@@ -31,6 +31,15 @@ class RenderService(QObject):
         self.proc = None
         self.conn = None
         self._lock = threading.Lock()
+        self._epoch = 0                  # номер запуска процесса рендера
+        self._restarts = []              # время перезапусков (защита от бесконечного цикла)
+        self._bad = {}                   # (key, gen, idx) -> сколько раз страница роняла рендер
+        self._fb_timer = QTimer(self)
+        self._fb_timer.setInterval(0)
+        self._fb_timer.timeout.connect(self._fallback_step)
+        self._start_process()
+
+    def _start_process(self):
         try:
             ctx = mp.get_context("spawn")
             if sys.executable.lower().endswith("pythonw.exe"):
@@ -38,14 +47,48 @@ class RenderService(QObject):
             parent, child = ctx.Pipe()
             self.proc = ctx.Process(target=render_proc.worker, args=(child,), daemon=True)
             self.proc.start()
+            child.close()
             self.conn = parent
-            threading.Thread(target=self._reader, daemon=True).start()
-        except Exception:
+            self._epoch += 1
+            threading.Thread(target=self._reader, args=(parent, self._epoch), daemon=True).start()
+            for key, (gen, data) in list(self._docs.items()):
+                with self._lock:
+                    parent.send(("load", key, gen, data))
+            return True
+        except Exception as e:
+            print("render process start failed:", e, file=sys.stderr)
             self.proc = None
             self.conn = None
-        self._fb_timer = QTimer(self)
-        self._fb_timer.setInterval(0)
-        self._fb_timer.timeout.connect(self._fallback_step)
+            return False
+
+    def _restart(self):
+        """Процесс рендера упал (нехватка памяти, «битый» PDF): перезапуск без потери работы."""
+        import time
+        now = time.time()
+        self._restarts = [t for t in self._restarts if now - t < 60] + [now]
+        lost = list(self._inflight.values())
+        self._inflight.clear()
+        for k in lost:                   # эти страницы были в работе при сбое
+            bk = k[:3]
+            self._bad[bk] = self._bad.get(bk, 0) + 1
+        try:
+            if self.proc is not None and self.proc.is_alive():
+                self.proc.terminate()
+        except Exception:
+            pass
+        if self.conn is not None:
+            self.conn.close()
+        self.conn = None
+        self.proc = None
+        if len(self._restarts) > 5:
+            print("render process keeps failing — rendering paused for problem pages", file=sys.stderr)
+        if self._start_process():
+            for k in lost:
+                if self._bad.get(k[:3], 0) < 2:
+                    entry = [0, True]
+                    self._pending[k] = entry
+                    heapq.heappush(self._heap, (0, next(self._counter), k, entry))
+        self._pump()
 
     # ---------------------------------------------------------------- документы
     def load(self, key, gen, data):
@@ -66,6 +109,8 @@ class RenderService(QObject):
     def close(self, key):
         self._docs.pop(key, None)
         self._fallback_docs.pop(key, None)
+        self.cancel(key)
+        self._bad = {k: v for k, v in self._bad.items() if k[0] != key}
         if self.conn:
             try:
                 with self._lock:
@@ -76,6 +121,8 @@ class RenderService(QObject):
     # ---------------------------------------------------------------- запросы
     def request(self, key, gen, idx, zoom, prio):
         k = (key, gen, idx, round(zoom, 4))
+        if self._bad.get(k[:3], 0) >= 2:     # страница дважды роняла рендер — не пытаемся снова
+            return
         if k in self._pending:
             entry = self._pending[k]
             if prio < entry[0]:
@@ -95,10 +142,14 @@ class RenderService(QObject):
             if k[0] == key and (keep is None or (k[2], k[3]) not in keep):
                 v[1] = False
                 del self._pending[k]
+        if len(self._heap) > max(128, 2 * len(self._pending)):
+            self._heap = [entry for entry in self._heap if entry[3][1]]
+            heapq.heapify(self._heap)
 
     def _pump(self):
         if not self.conn:
-            if self._heap and not self._fb_timer.isActive():
+            # рисуем в основном процессе, только если отдельный процесс вообще не запускается
+            if self.proc is None and self._heap and not self._fb_timer.isActive():
                 self._fb_timer.start()
             return
         while len(self._inflight) < self.MAX_IN_FLIGHT and self._heap:
@@ -111,28 +162,41 @@ class RenderService(QObject):
             try:
                 with self._lock:
                     self.conn.send(("render", rid, k[0], k[1], k[2], k[3]))
-            except OSError:
-                self.conn = None
+            except (OSError, ValueError):
                 self._inflight.pop(rid, None)
-                self._pump()
+                self._incoming.emit(("dead", self._epoch))
                 return
 
-    def _reader(self):
+    def _reader(self, conn, epoch):
+        """Поток приёма картинок. Любая ошибка (обрыв, нехватка памяти) — сигнал на перезапуск процесса."""
         while True:
             try:
-                msg = self.conn.recv()
-            except (EOFError, OSError, AttributeError):
-                break
+                msg = conn.recv()
+            except BaseException as e:  # noqa: BLE001 — поток не должен умирать молча
+                if not isinstance(e, (EOFError, OSError)):
+                    print("render reader error:", type(e).__name__, e, file=sys.stderr)
+                self._incoming.emit(("dead", epoch))
+                return
             self._incoming.emit(msg)
-        self.conn = None
 
     def _on_msg(self, msg):
+        if msg[0] == "dead":
+            if msg[1] == self._epoch and not getattr(self, "_shutting_down", False):
+                self._restart()
+            return
         rid = msg[1]
         k = self._inflight.pop(rid, None)
         if msg[0] == "img" and k:
-            _, _, w, h, stride, samples = msg
-            img = QImage(samples, w, h, stride, QImage.Format_RGB888).copy()
-            self.rendered.emit(k[0], k[1], k[2], k[3], img)
+            try:
+                _, _, w, h, stride, samples = msg
+                img = QImage(samples, w, h, stride, QImage.Format_RGB888).copy()
+                self.rendered.emit(k[0], k[1], k[2], k[3], img)
+            except MemoryError:
+                print("render: not enough memory for page image", file=sys.stderr)
+        elif msg[0] == "err" and k:
+            bk = k[:3]
+            self._bad[bk] = self._bad.get(bk, 0) + 1
+            print("render error:", msg[2] if len(msg) > 2 else "", file=sys.stderr)
         self._pump()
 
     # ---------------------------------------------------------------- запасной режим
@@ -158,6 +222,7 @@ class RenderService(QObject):
         self._fb_timer.stop()
 
     def shutdown(self):
+        self._shutting_down = True
         if self.conn:
             try:
                 with self._lock:
@@ -168,6 +233,10 @@ class RenderService(QObject):
             self.proc.join(0.5)
             if self.proc.is_alive():
                 self.proc.terminate()
+                self.proc.join(0.5)
+        if self.conn:
+            self.conn.close()
+            self.conn = None
 
 
 _service = None

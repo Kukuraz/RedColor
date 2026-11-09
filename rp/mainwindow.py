@@ -930,6 +930,7 @@ class MainWindow(QMainWindow):
         self.docs.pop(i)
         self.title.tabs.removeTab(i)
         self.stack.removeWidget(d)
+        d.cleanup()
         d.model.close()
         d.deleteLater()
         if not self.docs:
@@ -986,11 +987,25 @@ class MainWindow(QMainWindow):
                 return False
             except Exception as e:
                 QApplication.restoreOverrideCursor()
-                QMessageBox.warning(self, APP_NAME, f"Не удалось сохранить:\n{e}")
+                print("save failed:", type(e).__name__, e, file=sys.stderr)
+                mb = QMessageBox(self)
+                mb.setIcon(QMessageBox.Warning)
+                mb.setWindowTitle(APP_NAME)
+                mb.setText("Не удалось сохранить файл ни одним способом. Работа в программе не потеряна.")
+                mb.setDetailedText(str(e))
+                save_as = mb.addButton("Сохранить как…", QMessageBox.AcceptRole)
+                mb.addButton("Отмена", QMessageBox.RejectRole)
+                mb.exec()
+                if mb.clickedButton() == save_as:
+                    return self._save_as_doc(d)
                 return False
         QApplication.restoreOverrideCursor()
         S.add_recent(path)
-        self.toast.show_msg(f"Сохранено: {Path(path).name}")
+        if d.model.last_save_strategy == "pypdf":
+            self.toast.show_msg(f"Сохранено резервным способом: {Path(path).name} "
+                                f"(пометки в этом файле при повторном открытии уже не редактируются)", 6000)
+        else:
+            self.toast.show_msg(f"Сохранено: {Path(path).name}")
         return True
 
     def _save_as_doc(self, d):
@@ -1300,21 +1315,23 @@ class MainWindow(QMainWindow):
 
     # ================================================================ бланки и цитаты
     @staticmethod
-    def _blank_aid(p):
+    def _blank_aid(p, full=False):
         d = Path(S.get("blanks_dir") or "")
         try:
             rel = str(p.relative_to(d))
         except ValueError:
             rel = p.name
-        return "blank.file." + rel.replace("\\", "/")
+        return ("blank.full." if full else "blank.file.") + rel.replace("\\", "/")
 
     def rebuild_blank_actions(self):
-        for aid in [a for a in self.A.ordered() if a.startswith("blank.file.")]:
+        for aid in [a for a in self.A.ordered() if a.startswith(("blank.file.", "blank.full."))]:
             self.A.remove(aid)
         files = blanks.blank_files()
         for p in files:
             self.A.add(self._blank_aid(p), f"Бланк: {blanks.blank_label(p)}", "", lambda p=p: self.insert_blank(p),
                        "blank", "Бланки")
+            self.A.add(self._blank_aid(p, True), f"Полный бланк: {blanks.blank_label(p)}", "",
+                       lambda p=p: self.insert_blank(p, full=True), "check", "Бланки")
         self._watch_blanks()
         if hasattr(self, "panel"):
             self.panel.refresh_blanks(files)
@@ -1367,6 +1384,21 @@ class MainWindow(QMainWindow):
             sc = self.A.label(self._blank_aid(p)) if self.A.get(self._blank_aid(p)) else ""
             act = target.addAction(icons.icon("blank"), (name or label) + (f"\t{sc}" if sc else ""))
             act.triggered.connect(lambda _=False, p=p: self.insert_blank(p, at))
+        if files:
+            fm = menu.addMenu(icons.icon("check"), "Полные бланки (все «+» и баллы)")
+            fgroups = {}
+            for p in files:
+                label = blanks.blank_label(p)
+                parent, _, name = label.rpartition(" / ")
+                target = fm
+                if parent:
+                    if parent not in fgroups:
+                        fgroups[parent] = fm.addMenu(icons.icon("folder"), parent)
+                    target = fgroups[parent]
+                aid = self._blank_aid(p, True)
+                sc = self.A.label(aid) if self.A.get(aid) else ""
+                act = target.addAction(icons.icon("check"), (name or label) + (f"\t{sc}" if sc else ""))
+                act.triggered.connect(lambda _=False, p=p: self.insert_blank(p, at, full=True))
         menu.addSeparator()
         auto = menu.addAction("Случайная цитата при вставке")
         auto.setCheckable(True)
@@ -1383,7 +1415,7 @@ class MainWindow(QMainWindow):
         self._fill_blank_menu()
         self.blank_menu.exec(QCursor.pos())
 
-    def insert_blank(self, path, at=None):
+    def insert_blank(self, path, at=None, full=False):
         d = self.doc()
         if d is None:
             self.toast.show_msg("Сначала откройте документ")
@@ -1394,11 +1426,15 @@ class MainWindow(QMainWindow):
         try:
             src = blanks.prepared_blank(path)
             info = blanks.analyze(path)
+            marks = blanks.full_marks(path) if full else None
         except Exception as e:
             QMessageBox.warning(self, APP_NAME, f"Не удалось открыть бланк:\n{e}")
             return
-        m.undo.beginMacro(f"Бланк {Path(path).stem}")
-        new_pages = m.insert_pdf(src, at, f"Бланк {Path(path).stem}")
+        title = f"{'Полный бланк' if full else 'Бланк'} {Path(path).stem}"
+        m.undo.beginMacro(title)
+        new_pages = m.insert_pdf(src, at, title)
+        if full and new_pages:
+            self._add_full_marks(m, new_pages[0], marks)
         if S["auto_quote_on_blank"] and new_pages:
             q = blanks.QUOTES.next()
             if q:
@@ -1412,7 +1448,31 @@ class MainWindow(QMainWindow):
         m.undo.endMacro()
         if not d.in_organize():
             QTimer.singleShot(60, lambda: d.view.go_to_page(at))
-        self.toast.show_msg(f"Вставлен бланк «{Path(path).stem}»")
+        self.toast.show_msg(f"Вставлен {'полный ' if full else ''}бланк «{Path(path).stem}»")
+
+    def _add_full_marks(self, m, pi, marks):
+        """«+» поверх «–» и максимальные баллы — отдельными объектами (их можно стереть или поправить)."""
+        from PySide6.QtGui import QFontMetricsF
+        pairs = []
+        color = S.get("shape_color") or S["text_color"]
+        for xc, yc, half, width in marks.get("plus", []):
+            w = max(4.0, width * 2)
+            it = ShapeItem("vline", w, 2 * half, color, width)
+            it.setPos(xc - w / 2, yc - half)
+            pairs.append((pi, it))
+        for sc in marks.get("scores", []):
+            size = max(10.0, sc["cap"] / 0.66)
+            props = {"font": fonts.resolve(S["text_font"]), "size": round(size * 2) / 2, "color": S["text_color"],
+                     "bold": False, "italic": False, "align": "left"}
+            fm = QFontMetricsF(fonts.make_qfont(props["font"], props["size"]))
+            adv = fm.horizontalAdvance(sc["text"])
+            it = TextItem(props, adv + 2)
+            it.set_runs(((None, (("t", sc["text"]),)),))
+            it.fit_width(adv + 20)
+            it.setPos(sc["right"] - adv - 1, sc["baseline"] - fm.ascent())
+            pairs.append((pi, it))
+        if pairs:
+            m.add_items(pairs, "Плюсы и баллы")
 
     def _make_fitted_text(self, props, width, text, max_h):
         it = TextItem(props, width)

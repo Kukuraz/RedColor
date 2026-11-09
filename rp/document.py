@@ -122,7 +122,9 @@ class DocModel(QObject):
         self.scene.setItemIndexMethod(QGraphicsScene.BspTreeIndex)
         self.undo = QUndoStack(self)
         self.undo.setUndoLimit(200)
-        self.undo.cleanChanged.connect(lambda c: self.modified_changed.emit(not c))
+        self.undo.cleanChanged.connect(self._clean_changed)
+        self.closed = False
+        self.last_save_strategy = None
         self.path = str(path) if path else None
         self.title = title or (Path(path).name if path else "Без имени.pdf")
         self.pages = []
@@ -137,7 +139,17 @@ class DocModel(QObject):
             self._restore_items(self.pages[i], states)
         self.relayout()
         service().rendered.connect(self._on_rendered)
-        self.sync_render(initial_bytes=data if (self._opened_pdf and not restored) else None)
+        untouched = self._opened_pdf and not restored
+        self.sync_render(initial_bytes=data if untouched else None)
+        # исходные байты, пока документ не меняли: сохраняем их как есть, без пересборки библиотекой
+        self._src_bytes = data if untouched else None
+
+    def _clean_changed(self, clean):
+        if not self.closed:
+            try:
+                self.modified_changed.emit(not clean)
+            except RuntimeError:
+                pass
 
     def _open_bytes(self, data, ext):
         self._opened_pdf = True
@@ -212,6 +224,8 @@ class DocModel(QObject):
 
     def sync_render(self, initial_bytes=None):
         self.gen += 1
+        if initial_bytes is None:
+            self._src_bytes = None          # документ изменён — при сохранении берём его новую версию
         data = initial_bytes if initial_bytes is not None else self.doc.tobytes(garbage=0, deflate=False)
         service().load(self.key, self.gen, data)
 
@@ -261,11 +275,13 @@ class DocModel(QObject):
         return any(p.overlay_items() for p in self.pages)
 
     def close(self):
+        self.closed = True
         service().close(self.key)
-        try:
-            service().rendered.disconnect(self._on_rendered)
-        except (RuntimeError, TypeError):
-            pass
+        for sig, slot in ((service().rendered, self._on_rendered), (self.undo.cleanChanged, self._clean_changed)):
+            try:
+                sig.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
         self.doc.close()
 
     # ---------------------------------------------------------------- поворот
@@ -378,9 +394,7 @@ class DocModel(QObject):
         self.undo.push(FuncCmd("Порядок страниц", lambda: self._reorder(new), lambda: self._reorder(old)))
 
     def extract_pages(self, indices, path):
-        out = self.build_output(sorted(indices))
-        out.save(path, garbage=3, deflate=True)
-        out.close()
+        self.write_pdf(path, indices=sorted(indices))
 
     # ---------------------------------------------------------------- объекты
     def add_items(self, pairs, text="Добавление", already=False):
@@ -426,45 +440,46 @@ class DocModel(QObject):
         self.undo.push(StateCmd(items, before, after, text))
 
     # ---------------------------------------------------------------- сохранение
-    def build_output(self, indices=None, editable=True):
-        out = pymupdf.open(stream=self.doc.tobytes(garbage=0), filetype="pdf")
-        for i, pi in enumerate(self.pages):
-            items = pi.overlay_items()
-            if not items:
-                continue
-            page = out[i]
-            r = page.rect                       # отображаемая ориентация
-            target = r * page.derotation_matrix   # та же область в координатах неповёрнутой страницы
-            target.normalize()
-            ov = pymupdf.open()
-            op = ov.new_page(width=r.width, height=r.height)
-            items = sorted(items, key=lambda x: x.zValue())
-            for it in items:
-                try:
+    def build_overlay(self):
+        """Только наши пометки — отдельным PDF (страница на каждую страницу с пометками).
+        Шрифты и содержимое исходного документа здесь не участвуют, поэтому это безопасно для любого PDF."""
+        ov = pymupdf.open()
+        pages = []
+        from .formula import release_pdf_cache
+        try:
+            for i, pi in enumerate(self.pages):
+                items = pi.overlay_items()
+                if not items:
+                    continue
+                op = ov.new_page(width=pi.w, height=pi.h)
+                items = sorted(items, key=lambda x: x.zValue())
+                states = []
+                for it in items:
                     it.bake(op)
-                except Exception as e:  # один объект не должен ломать сохранение
-                    print("bake error:", e)
-            before = set(page.get_contents())
-            page.show_pdf_page(target, ov, 0, overlay=True, keep_proportion=False, rotate=page.rotation)
+                    states.append(it.export_state())
+                pages.append({"page": i, "ov": ov.page_count - 1, "items": states})
+        except Exception as e:
             ov.close()
-            added = [x for x in page.get_contents() if x not in before]
-            added = [x for x in added if b"Do" in out.xref_stream(x)]
-            if editable and len(added) == 1:
-                try:
-                    states = {"v": 1, "items": [it.export_state() for it in items]}
-                    sx = out.get_new_xref()
-                    out.update_object(sx, "<<>>")
-                    out.update_stream(sx, json.dumps(states, ensure_ascii=False).encode("utf-8"))
-                    out.xref_set_key(page.xref, "RedColorItems", f"{sx} 0 R")
-                    out.xref_set_key(page.xref, "RedColorContent", f"{added[0]} 0 R")
-                except Exception as e:
-                    print("layer save error:", e)
+            raise SaveFailedError(f"Не удалось сохранить пометку на странице {i + 1}: {e}") from e
+        finally:
+            release_pdf_cache()
+        return ov, pages
+
+    def source_bytes(self):
+        """Байты документа без пометок. Если документ не меняли — исходный файл как есть."""
+        if self._src_bytes is not None:
+            return self._src_bytes
+        return self.doc.tobytes(garbage=0)
+
+    def build_output(self, indices=None, editable=True):
+        """Готовый документ в памяти (для печати, экспорта картинок, сжатия)."""
+        from .savejob import merge_mupdf
+        out = pymupdf.open(stream=self.source_bytes(), filetype="pdf")
+        ov, pages = self.build_overlay()
+        merge_mupdf(out, ov, pages, editable=editable, subset=True)
+        ov.close()
         if indices is not None:
             out.select(indices)
-        try:
-            out.subset_fonts()
-        except Exception:
-            pass
         try:
             meta = dict(out.metadata or {})
             meta["creator"] = f"{APP_NAME} {APP_VERSION} — {AUTHOR}"
@@ -473,35 +488,39 @@ class DocModel(QObject):
             pass
         return out
 
-    def save(self, path):
-        """Сохраняет через временный файл. Если файл занят другой программой (например, открыт
-        в Adobe Acrobat) — несколько попыток, затем FileLockedError; временный файл удаляется."""
-        import time
-        out = self.build_output()
-        tmp = str(path) + ".redcolor.tmp"
+    def write_pdf(self, path, indices=None, editable=True):
+        """Защищённая запись в файл: склейка в отдельном процессе (сбой библиотеки PDF не закрывает
+        программу), несколько способов по очереди, замена файла с учётом блокировок.
+        Возвращает название сработавшего способа."""
+        import shutil
+        import tempfile
+        from . import savejob
+        job = Path(tempfile.mkdtemp(prefix="redcolor_save_"))
         try:
-            out.save(tmp, garbage=3, deflate=True)
+            (job / "src.pdf").write_bytes(self.source_bytes())
+            ov, pages = self.build_overlay()
+            if pages:
+                ov.save(str(job / "ov.pdf"))
+            ov.close()
+            (job / "job.json").write_text(json.dumps({
+                "pages": pages, "editable": editable, "indices": indices,
+                "creator": f"{APP_NAME} {APP_VERSION} — {AUTHOR}"}, ensure_ascii=False), encoding="utf-8")
+            result, strategy, errors = savejob.run(job)
+            if result is None:
+                raise SaveFailedError("\n".join(errors) or "неизвестная ошибка")
+            _replace_file(result, path)
+            return strategy
         finally:
-            out.close()
-        last = None
-        for attempt in range(6):
-            try:
-                os.replace(tmp, path)
-                last = None
-                break
-            except PermissionError as e:     # занят (Acrobat, синхронизация OneDrive и т.п.)
-                last = e
-                time.sleep(0.25 * (attempt + 1))
-        if last is not None:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-            raise FileLockedError(str(path)) from last
+            shutil.rmtree(job, ignore_errors=True)
+
+    def save(self, path):
+        strategy = self.write_pdf(path)
+        self.last_save_strategy = strategy
         self.path = str(path)
         self.title = Path(path).name
         self.undo.setClean()
         self.path_changed.emit(self.path)
+        return strategy
 
     # ---------------------------------------------------------------- «1» в комментариях бланков
     def remove_comment_ones(self):
@@ -548,3 +567,35 @@ class DocModel(QObject):
 
 class FileLockedError(Exception):
     """Файл занят другой программой."""
+
+
+class SaveFailedError(Exception):
+    """Ни один способ сохранения не сработал."""
+
+
+def _replace_file(src, dst):
+    """Записывает рядом временную копию и только затем заменяет исходный файл."""
+    import shutil
+    import tempfile
+    import time
+    dst = Path(dst)
+    fd, tmp = tempfile.mkstemp(prefix=f".{dst.name}.redcolor-", suffix=".tmp", dir=str(dst.parent))
+    try:
+        with os.fdopen(fd, "wb") as out, open(src, "rb") as source:
+            shutil.copyfileobj(source, out)
+            out.flush()
+            os.fsync(out.fileno())
+        last = None
+        for attempt in range(10):
+            try:
+                os.replace(tmp, dst)
+                return
+            except PermissionError as e:
+                last = e
+                time.sleep(0.2 + 0.15 * attempt)
+        raise FileLockedError(str(dst)) from last
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
