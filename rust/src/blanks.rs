@@ -609,6 +609,40 @@ pub fn full_marks(path: &Path, s: &Settings) -> FullMarks {
     out
 }
 
+#[cfg(test)]
+mod real_blank_tests {
+    use super::*;
+    #[test]
+    fn preserves_annotations_when_inserting_user_blank() {
+        let Ok(path) = std::env::var("REDCOLOR_TEST_BLANK") else { return };
+        let data = std::fs::read(path).unwrap();
+        let original = PdfDocument::from_bytes(&data).unwrap();
+        let before = original.load_pdf_page(0).unwrap().annotations().count();
+        let original_render = original.load_page(0).unwrap().to_pixmap(&Matrix::new_scale(0.5, 0.5), &Colorspace::device_rgb(), false, true).unwrap();
+        let original_pixels = original_render.samples().to_vec();
+        let info = analyze_page(&original.load_page(0).unwrap(), None);
+        eprintln!("quote placement={:?}, label={:?}", quote_placement(&info, 16.0), info.label);
+        let (x, y, _, _, _) = quote_placement(&info, 16.0);
+        assert!((x - 41.76).abs() < 6.0 && (y - 580.44).abs() < 6.0, "unexpected quote location: {x}, {y}");
+        assert!(!score_slots(&original.load_page(0).unwrap()).is_empty(), "score field must be detected");
+        let mut target = PdfDocument::new();
+        target.new_page(mupdf::Size::new(612.0, 792.0)).unwrap();
+        crate::docops::insert_with_annotations(&mut target, &original, 1, mupdf::pdf::InsertPdfOptions { target: mupdf::pdf::InsertPosition::Append, copy_annotations: true, copy_links: true, copy_widgets: true, ..Default::default() }).unwrap();
+        let mut bytes = Vec::new(); target.write_to(&mut bytes).unwrap();
+        let reopened = PdfDocument::from_bytes(&bytes).unwrap();
+        let page = reopened.load_pdf_page(1).unwrap();
+        let after = page.annotations().count();
+        eprintln!("annotations before={before}, after={after}, score slots={:?}", score_slots(&page));
+        assert_eq!(after, before, "annotations must survive insertion");
+        let target_page = reopened.load_page(1).unwrap();
+        let matrix = Matrix::new_scale(0.5, 0.5);
+        let after = target_page.to_pixmap(&matrix, &Colorspace::device_rgb(), false, true).unwrap();
+        assert_eq!(original_pixels.len(), after.samples().len());
+        let changed = original_pixels.iter().zip(after.samples()).filter(|(a, b)| a.abs_diff(**b) > 8).count();
+        assert!(changed * 1000 < original_pixels.len(), "rendered blank differs in {changed} channels of {}", original_pixels.len());
+    }
+}
+
 /// Убирает «1» из файла бланка (оригинал — в backup_dir). Возвращает число удалённых.
 pub fn clean_blank_file(path: &Path, backup_dir: &Path) -> usize {
     let Ok(data) = std::fs::read(path) else { return 0 };

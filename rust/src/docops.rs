@@ -33,6 +33,40 @@ fn to_bytes(doc: &PdfDocument) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// MuPDF's page graft copies page contents but omits /Annots even when the
+/// Rust wrapper's options say to copy them. Copy them explicitly so marks,
+/// stamps and other visible objects are not lost when inserting pages.
+pub(crate) fn insert_with_annotations(dst: &mut PdfDocument, src: &PdfDocument, at: usize, opts: InsertPdfOptions) -> Result<(), String> {
+    let count = src.page_count().map_err(e)? as usize;
+    let mut annotations = Vec::with_capacity(count);
+    for i in 0..count {
+        let page = src.find_page(i as i32).map_err(e)?;
+        let annots = page.get_dict("Annots").map_err(e)?;
+        if let Some(ref arr) = annots {
+            if arr.is_array().map_err(e)? {
+                for item in arr.array_iter().map_err(e)? {
+                    let mut item = item.map_err(e)?;
+                    if item.is_dict().map_err(e)? {
+                        // /P points back to the source page; it is optional in
+                        // PDF and must not import the old page tree.
+                        item.dict_delete("P").map_err(e)?;
+                    }
+                }
+            }
+        }
+        annotations.push(annots);
+    }
+    dst.insert_pdf(src, opts).map_err(e)?;
+    for (i, annots) in annotations.into_iter().enumerate() {
+        if let Some(annots) = annots {
+            let copied = dst.graft_object(&annots).map_err(e)?;
+            let mut page = dst.find_page((at + i) as i32).map_err(e)?;
+            page.dict_put("Annots", copied).map_err(e)?;
+        }
+    }
+    Ok(())
+}
+
 /// PDF из файла (изображения превращаются в PDF).
 pub fn file_as_pdf(path: &std::path::Path) -> Result<Vec<u8>, String> {
     let data = std::fs::read(path).map_err(|x| x.to_string())?;
@@ -151,7 +185,7 @@ impl App {
             let n = src.page_count().map_err(e)? as usize;
             let opts = InsertPdfOptions { target: InsertPosition::Before(at), copy_annotations: true, copy_links: true, copy_widgets: true, ..Default::default() };
             let opts = if at >= self.docs[c].pages.len() { InsertPdfOptions { target: InsertPosition::Append, ..opts } } else { opts };
-            doc.insert_pdf(&src, opts).map_err(e)?;
+            insert_with_annotations(&mut doc, &src, at.min(self.docs[c].pages.len()), opts)?;
             Ok((to_bytes(&doc)?, n))
         })();
         match r {
