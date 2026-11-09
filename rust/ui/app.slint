@@ -176,7 +176,7 @@ component HomePage inherits Rectangle {
                 Image { source: @image-url("logo.png"); width: 56px; height: 56px; }
                 VerticalLayout {
                     alignment: center;
-                    Text { text: "RedColor"; font-size: 24px; font-weight: 700; color: Theme.text; }
+                    Text { text: "BlueColor"; font-size: 24px; font-weight: 700; color: Theme.text; }
                     Text { text: "Редактор PDF для проверки работ"; color: Theme.text2; font-size: 13px; }
                 }
                 Rectangle { }
@@ -209,7 +209,7 @@ component HomePage inherits Rectangle {
                 }
             }
             Text { text: "Перетащите PDF на ярлык или откройте через Ctrl+O."; color: Theme.text3; font-size: 13px; }
-            Text { text: "RedColor " + root.version + " · Автор: Maksim Belonoskin, Zelenograd, Moscow, Russia"; color: Theme.text3; font-size: 11px; }
+            Text { text: "BlueColor " + root.version + " · Автор: Maksim Belonoskin, Zelenograd, Moscow, Russia"; color: Theme.text3; font-size: 11px; }
         }
     }
 }
@@ -265,7 +265,7 @@ component RightRail inherits Rectangle {
 }
 
 export component AppWindow inherits Window {
-    title: "RedColor";
+    title: "BlueColor";
     icon: @image-url("logo.png");
     preferred-width: 1400px;
     preferred-height: 900px;

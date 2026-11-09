@@ -658,33 +658,33 @@ impl App {
             let (k, _) = h.create_subkey(path)?;
             k.set_value(name, &val.to_string())
         };
-        let base = r"Software\Classes\RedColorRust.PDF";
+        let base = r"Software\Classes\BlueColor.PDF";
         let r = (|| -> std::io::Result<()> {
-            set(base, "", "Документ PDF (RedColor Rust)")?;
+            set(base, "", "Документ PDF (BlueColor)")?;
             set(base, "FriendlyTypeName", "Документ PDF")?;
             set(&format!(r"{base}\DefaultIcon"), "", &ico)?;
-            set(&format!(r"{base}\Application"), "ApplicationName", "RedColor Rust")?;
+            set(&format!(r"{base}\Application"), "ApplicationName", "BlueColor")?;
             set(&format!(r"{base}\Application"), "ApplicationIcon", &ico)?;
             set(&format!(r"{base}\Application"), "ApplicationDescription", "Редактор PDF для проверки работ")?;
             set(&format!(r"{base}\Application"), "ApplicationCompany", "Maksim Belonoskin, Zelenograd, Moscow, Russia")?;
             set(&format!(r"{base}\shell"), "", "open")?;
-            set(&format!(r"{base}\shell\open"), "FriendlyAppName", "RedColor")?;
+            set(&format!(r"{base}\shell\open"), "FriendlyAppName", "BlueColor")?;
             set(&format!(r"{base}\shell\open\command"), "", &cmd)?;
-            set(r"Software\Classes\.pdf\OpenWithProgids", "RedColorRust.PDF", "")?;
-            let cap = r"Software\RedColorRust\Capabilities";
-            set(cap, "ApplicationName", "RedColor Rust")?;
+            set(r"Software\Classes\.pdf\OpenWithProgids", "BlueColor.PDF", "")?;
+            let cap = r"Software\BlueColor\Capabilities";
+            set(cap, "ApplicationName", "BlueColor")?;
             set(cap, "ApplicationIcon", &ico)?;
             set(cap, "ApplicationDescription", "Редактор PDF для проверки работ")?;
-            set(&format!(r"{cap}\FileAssociations"), ".pdf", "RedColorRust.PDF")?;
-            set(r"Software\RegisteredApplications", "RedColor Rust", cap)?;
+            set(&format!(r"{cap}\FileAssociations"), ".pdf", "BlueColor.PDF")?;
+            set(r"Software\RegisteredApplications", "BlueColor", cap)?;
             Ok(())
         })();
         match r {
             Ok(()) => {
-                let _ = std::process::Command::new("explorer").arg("ms-settings:defaultapps?registeredAppUser=RedColor%20Rust").spawn();
+                let _ = std::process::Command::new("explorer").arg("ms-settings:defaultapps?registeredAppUser=BlueColor").spawn();
                 rfd::MessageDialog::new()
-                    .set_title("RedColor")
-                    .set_description("RedColor Rust зарегистрирован как программа для PDF.\n\nВ открывшемся окне Windows выберите RedColor Rust для PDF.")
+                    .set_title("BlueColor")
+                    .set_description("BlueColor зарегистрирован как программа для PDF.\n\nВ открывшемся окне Windows выберите BlueColor для PDF.")
                     .show();
             }
             Err(err) => self.toast(&format!("Не удалось зарегистрировать: {err}")),
