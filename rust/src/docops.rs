@@ -164,7 +164,12 @@ impl App {
         let Some(c) = self.cur else { return };
         let r = (|| -> Result<Vec<u8>, String> {
             let mut doc = PdfDocument::from_bytes(&self.docs[c].src).map_err(e)?;
-            doc.select_pages(order.clone()).map_err(e)?;
+            let mut current: Vec<usize> = (0..self.docs[c].pages.len()).collect();
+            for (to, original) in order.iter().enumerate() {
+                let from = current.iter().position(|v| v == original).ok_or("Invalid page order")?;
+                if from != to { doc.move_page(from, to).map_err(e)?; let value = current.remove(from); current.insert(to, value); }
+            }
+            doc.select_pages((0..order.len()).collect::<Vec<usize>>()).map_err(e)?;
             to_bytes(&doc)
         })();
         match r {

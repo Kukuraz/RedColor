@@ -286,13 +286,7 @@ impl App {
             "page.move_up" => self.move_page(-1),
             "page.move_down" => self.move_page(1),
             "page.replace" => self.later(|a| a.replace_page_dialog()),
-            "view.organize" => self.show_menu(
-                "Систематизация страниц",
-                ["page.rotate_cw", "page.rotate_ccw", "page.delete", "page.move_up", "page.move_down", "page.insert_blank", "page.insert_file", "page.replace", "page.extract"]
-                    .iter()
-                    .map(|i| crate::features::menu(i, action_name(i)))
-                    .collect(),
-            ),
+            "view.organize" => { self.finish_edit(); self.win().set_org_selected(self.current_page_index() as i32); self.refresh_organizer(); },
             "view.goto" => {
                 let cur = self.current_page_index() + 1;
                 self.input_dialog("Перейти к странице", "Номер страницы:", &cur.to_string(), "goto");
@@ -364,6 +358,7 @@ pub(crate) fn connect(win: &AppWindow) {
     win.on_set_mode(|m| {
         with_app(|a| a.set_mode(m.as_str()));
     });
+    win.on_org_action(|id, target| { with_app(|a| a.organizer_action(id.as_str(), target)); });
     win.on_action(|id| {
         with_app(|a| a.action(id.as_str()));
     });

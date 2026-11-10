@@ -148,7 +148,7 @@ mod tests {
     }
 }
 
-fn render_page(doc: &mupdf::Document, idx: usize, zoom: f32) -> Result<(u32, u32, Vec<u8>), mupdf::Error> {
+pub(crate) fn render_page(doc: &mupdf::Document, idx: usize, zoom: f32) -> Result<(u32, u32, Vec<u8>), mupdf::Error> {
     let page = doc.load_page(idx as i32)?;
     let m = mupdf::Matrix::new_scale(zoom, zoom);
     let pix = page.to_pixmap(&m, &mupdf::Colorspace::device_rgb(), false, true)?;

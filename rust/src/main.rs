@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
+mod organize;
 mod clip;
 mod blanks;
 mod docops;
@@ -568,6 +569,12 @@ impl App {
         // русская раскладка: те же клавиши
         let lat_s = panel::ru_to_en(text);
         let lat = lat_s.as_str();
+        if self.win().get_org_visible() {
+            if text == k(Key::Escape).as_str() { self.organizer_action("close", 0); }
+            else if text == k(Key::Delete).as_str() { self.organizer_action("delete", 0); }
+            else if ctrl && lat == "z" { self.organizer_action("undo", 0); }
+            return;
+        }
         if self.editing.is_some() {
             // во время правки текста — только Esc и сочетания с Ctrl
             if text == k(Key::Escape).as_str() {

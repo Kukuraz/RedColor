@@ -266,6 +266,14 @@ component RightRail inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "BlueColor";
+    in-out property <bool> org-visible: false;
+    in-out property <int> org-selected: 0;
+    private property <int> org-drag: -1;
+    private property <int> org-drop: -1;
+    in property <int> org-start;
+    in property <int> org-total;
+    in property <[image]> org-images;
+    callback org-action(string, int);
     icon: @image-url("logo.png");
     preferred-width: 1400px;
     preferred-height: 900px;
@@ -999,6 +1007,58 @@ export component AppWindow inherits Window {
                         Button { text: "Сохранить"; primary: true; clicked => { root.sig-save(); keys.focus(); } }
                     }
                 }
+            }
+        }
+    }
+    if root.org-visible : Rectangle {
+        background: Theme.bg;
+        TouchArea { }
+        VerticalLayout {
+            padding: 16px; spacing: 10px;
+            HorizontalLayout {
+                Text { text: "Систематизация страниц"; color: Theme.text; font-size: 20px; }
+                Button { text: "Готово"; clicked => { root.org-action("close", 0); } }
+            }
+            HorizontalLayout {
+                Button { text: "Повернуть влево"; clicked => { root.org-action("rotate", -90); } }
+                Button { text: "Повернуть вправо"; clicked => { root.org-action("rotate", 90); } }
+                Button { text: "Удалить"; clicked => { root.org-action("delete", 0); } }
+                Button { text: "←"; enabled: root.org-selected > 0; clicked => { root.org-action("move", root.org-selected - 1); } }
+                Button { text: "→"; enabled: root.org-selected + 1 < root.org-total; clicked => { root.org-action("move", root.org-selected + 1); } }
+                Button { text: "Пустая страница"; clicked => { root.org-action("insert", 0); } }
+                Button { text: "Отменить"; clicked => { root.org-action("undo", 0); } }
+            }
+            Text { text: "Выберите страницу. Зажмите левую кнопку мыши на миниатюре, перенесите её на нужное место и отпустите."; color: Theme.text; }
+            org-scroll := Rectangle {
+                property <int> columns: max(1, floor(self.width / 180px));
+                clip: true; vertical-stretch: 1;
+                for img[i] in root.org-images : Rectangle {
+                    x: mod(i, org-scroll.columns) * 180px;
+                    y: floor(i / org-scroll.columns) * 225px;
+                    width: 170px; height: 217px;
+                    background: root.org-selected == root.org-start + i ? #246ac2 : #444444;
+                    border-radius: 5px;
+                    Image { source: img; x: 6px; y: 6px; width: parent.width - 12px; height: 185px; image-fit: contain; }
+                    Text { y: 193px; width: parent.width; text: "" + (root.org-start + i + 1); horizontal-alignment: center; color: white; }
+                    TouchArea {
+
+                        mouse-cursor: self.pressed ? grabbing : grab;
+                        moved => { if self.pressed { root.org-drop = clamp(floor((mod(i, org-scroll.columns) * 180px + self.mouse-x) / 180px), 0, org-scroll.columns - 1) + org-scroll.columns * floor((floor(i / org-scroll.columns) * 225px + self.mouse-y) / 225px); } }
+                        pointer-event(e) => {
+                            if e.button == PointerEventButton.left && e.kind == PointerEventKind.down {
+                                root.org-drag = i; root.org-drop = i; root.org-action("select", root.org-start + i);
+                            }
+                            if e.button == PointerEventButton.left && e.kind == PointerEventKind.up {
+                                root.org-drag = -1; root.org-drop = -1; root.org-action("move", root.org-start + clamp(floor((mod(i, org-scroll.columns) * 180px + self.mouse-x) / 180px), 0, org-scroll.columns - 1) + org-scroll.columns * floor((floor(i / org-scroll.columns) * 225px + self.mouse-y) / 225px));
+                            }
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                Button { text: "Предыдущие"; enabled: root.org-start > 0; clicked => { root.org-action("batch", root.org-start - 12); } }
+                Text { text: "Страница " + (root.org-selected + 1) + " из " + root.org-total; color: Theme.text; }
+                Button { text: "Следующие"; enabled: root.org-start + 12 < root.org-total; clicked => { root.org-action("batch", root.org-start + 12); } }
             }
         }
     }
